@@ -23,6 +23,8 @@ services:
         sync: false
       - key: LLM_PROVIDER
         value: openai
+      - key: BOT_NAME
+        value: 미유
       - key: PORT
         value: 8080
 

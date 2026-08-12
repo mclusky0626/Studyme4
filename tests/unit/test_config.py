@@ -21,3 +21,8 @@ def test_persona_string_is_used_when_file_is_missing(tmp_path):
 def test_blank_optional_discord_application_id_is_allowed():
     settings = Settings(_env_file=None, discord_application_id="")
     assert settings.discord_application_id is None
+
+
+def test_default_character_name_is_miyu():
+    settings = Settings(_env_file=None)
+    assert settings.bot_name == "미유"

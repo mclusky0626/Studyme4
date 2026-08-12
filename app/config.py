@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     grok_api_key: SecretStr = SecretStr("")
     grok_chat_model: str = "grok-3-mini"
 
-    bot_name: str = "스터디미"
+    bot_name: str = "미유"
     bot_persona: str = "친근하고 간결한 한국어 반말을 쓰되 AI임을 숨기지 않는다."
     bot_persona_file: str = "persona.md"
     persona_version: str = "v1"
