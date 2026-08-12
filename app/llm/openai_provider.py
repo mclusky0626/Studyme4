@@ -79,9 +79,11 @@ class OpenAICompatibleProvider:
                 {
                     "role": "system",
                     "content": (
-                        "첨부 이미지를 나중에 한국어로 검색할 수 있도록 사실적으로 설명해. "
-                        "보이는 사람·사물·장소·색·행동·분위기와 읽을 수 있는 글자를 포함하되, "
-                        "확실하지 않은 신원이나 민감한 특성은 추측하지 마."
+                        "너는 정밀한 이미지 기록 분석기다. 검색과 향후 회상을 위해 이미지의 "
+                        "시각적 근거를 빠짐없이 한국어 평문으로 기록해. 보이는 사람·사물·장소·색·"
+                        "행동·배경·구도·조명·화풍·분위기와 읽을 수 있는 글자를 포함하되, "
+                        "확실하지 않은 신원이나 민감한 특성은 추측하지 마. Markdown 서식이나 "
+                        "대괄호 제목은 출력하지 마."
                     ),
                 },
                 {
@@ -92,7 +94,7 @@ class OpenAICompatibleProvider:
                             "type": "image_url",
                             "image_url": {
                                 "url": f"data:{content_type};base64,{encoded}",
-                                "detail": "low",
+                                "detail": "high",
                             },
                         },
                     ],

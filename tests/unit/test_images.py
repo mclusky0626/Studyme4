@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from app.images.intent import is_image_recall_request
 from app.images.repository import ImageRepository
-from app.images.service import ImageArchiveService
+from app.images.service import ImageArchiveService, clean_image_description, image_analysis_prompt
 from app.images.storage import LocalImageStorage
 from app.llm.fake_provider import FakeProvider
 from app.memory.privacy import MemoryScope
@@ -46,6 +46,21 @@ def test_image_recall_intent() -> None:
     assert is_image_recall_request("고양이 짤 다시 찾아줘")
     assert is_image_recall_request("그 사진 다시 보내줘")
     assert not is_image_recall_request("사진 분석해줘")
+
+
+def test_image_analysis_prompt_requests_detail_and_plain_text() -> None:
+    prompt = image_analysis_prompt("이게 뭐야?")
+    assert "8~12문장" in prompt
+    assert "구도" in prompt
+    assert "읽을 수 있는 글자" in prompt
+    assert "Markdown" in prompt
+    assert "이게 뭐야?" in prompt
+
+
+def test_image_description_markup_is_removed() -> None:
+    assert clean_image_description("## [[작품 **\n- **고풍스러운** 그림") == (
+        "작품\n고풍스러운 그림"
+    )
 
 
 async def test_archive_analyze_search_and_delete(sessions, tmp_path) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import re
 
 import discord
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -12,6 +13,26 @@ from app.images.storage import LocalImageStorage
 from app.llm.base import LLMProvider
 
 log = logging.getLogger(__name__)
+
+_DESCRIPTION_MARKUP = re.compile(r"\[\[|\]\]|\*\*|__|`{1,3}")
+
+
+def image_analysis_prompt(message_text: str) -> str:
+    return (
+        "나중에 검색하고 사용자에게 다시 자세히 설명할 수 있도록 "
+        "이 이미지를 한국어 8~12문장으로 분석해. 보이는 대상의 외형과 "
+        "행동, 전경·중경·배경, 구도와 시점, 주요 색상, 조명, 화풍 또는 "
+        "사진 스타일, 분위기, 읽을 수 있는 글자를 빠뜨리지 마. "
+        "작품명·인물명은 근거가 충분할 때만 쓰고 불확실하면 후보라고 밝혀. "
+        "마지막 문장에는 동의어를 포함한 검색 키워드를 쉼표로 적어. "
+        "Markdown, 대괄호 제목, 별표 강조는 사용하지 마. "
+        f"함께 적힌 메시지: {message_text or '(없음)'}"
+    )
+
+
+def clean_image_description(value: str) -> str:
+    lines = [line.strip().lstrip("#-• ").strip() for line in value.splitlines()]
+    return "\n".join(_DESCRIPTION_MARKUP.sub("", line).strip() for line in lines if line).strip()
 
 
 class ImageArchiveService:
@@ -68,14 +89,10 @@ class ImageArchiveService:
                         analyzed = await self.provider.describe_image(
                             data=data,
                             content_type=content_type,
-                            prompt=(
-                                "검색용으로 이 이미지를 한국어 3~6문장으로 설명해. "
-                                "마지막에는 핵심 사물과 장면의 비슷한 표현을 검색 키워드로 적어. "
-                                f"함께 적힌 메시지: {message_text or '(없음)'}"
-                            ),
+                            prompt=image_analysis_prompt(message_text),
                         )
                         if analyzed:
-                            description = analyzed[:4000]
+                            description = clean_image_description(analyzed)[:4000]
                     except Exception:
                         log.exception("image analysis failed for attachment %s", attachment.id)
                 async with self.sessions() as session, session.begin():

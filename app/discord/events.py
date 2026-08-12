@@ -212,23 +212,19 @@ class DiscordEventHandler:
                     owner_user_id=author.id,
                 )
 
-        image_context = "\n".join(f"- {image.description}" for image in archived_images)
-        content_for_model = normalized.content
-        if image_context:
-            content_for_model += f"\n\n[방금 첨부된 이미지 분석]\n{image_context}"
-
         async with self.sessions() as session, session.begin():
             context = await ContextBuilder(
                 MessageRepository(session),
                 MemoryRetriever(MemoryRepository(session)),
                 RelationshipRepository(session),
             ).build(
-                query=content_for_model,
+                query=normalized.content,
                 scope=scope,
                 relevant_user_ids=[author.id, bot_identity.id],
                 recent_limit=self.settings.recent_message_limit,
                 memory_top_k=self.settings.memory_top_k,
             )
+            context.image_descriptions = [image.description for image in archived_images]
 
         try:
             if recall_request:
@@ -240,7 +236,7 @@ class DiscordEventHandler:
             else:
                 reply = await self.response_generator.generate(
                     author_name=normalized.author_name,
-                    content=content_for_model,
+                    content=normalized.content,
                     context=context,
                     profile=self.profile,
                 )
