@@ -1,5 +1,8 @@
 # Studyme Memory Bot v2
 
+[![CI](https://github.com/mclusky0626/Studyme4/actions/workflows/ci.yml/badge.svg)](https://github.com/mclusky0626/Studyme4/actions/workflows/ci.yml)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fmclusky0626%2FStudyme4)
+
 Discord 단체 채팅에서 사람·사건·취향·약속·관계 변화를 출처와 공개 범위와 함께 기억하는 AI 챗봇입니다. Studyme3의 자연스러운 Discord 대화 UX는 계승하고, 기억 저장은 검증기를 반드시 통과하도록 분리했습니다.
 
 ## 현재 구현된 MVP
