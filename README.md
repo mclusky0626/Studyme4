@@ -25,9 +25,35 @@ Discord 단체 채팅에서 사람·사건·취향·약속·관계 변화를 출
 첫 버전은 텍스트 기억 정확도에 집중합니다. 이미지 장기 기억은 비활성화되어 있고,
 접두사 없는 참여 판단은 확신이 낮거나 판단 모델이 실패하면 침묵합니다.
 
-## 빠른 시작
+## 맥에서 가장 쉽게 실행
 
-필요 조건은 Python 3.12, PostgreSQL 16 + pgvector, Redis 7입니다.
+Finder에서 **`미유 실행.command`**를 더블클릭하세요.
+
+처음 실행할 때만 다음 작업을 자동으로 처리합니다.
+
+1. Discord 봇 토큰과 LLM API 키를 보이지 않게 입력받음
+2. 대화 모델과 접두사 없는 대화 감지 방식 선택
+3. 프로젝트 전용 Python 환경과 패키지 자동 설치
+4. 로컬 SQLite 데이터베이스 생성과 마이그레이션
+5. 미유 실행
+
+두 번째 실행부터는 `미유 실행.command`만 더블클릭하면 바로 시작합니다. 실행 중 열린
+Terminal 창을 닫거나 `Ctrl+C`를 누르면 종료됩니다. 설정을 바꾸려면 **`미유 설정.command`**를
+실행하세요.
+
+macOS가 처음 실행을 막으면 파일을 우클릭하고 **열기**를 한 번 선택하세요. Python 3.12
+이상이 없다는 안내가 나올 때만 다음 명령으로 설치하면 됩니다.
+
+```bash
+brew install python@3.12
+```
+
+이 로컬 구동 방식에는 Docker, PostgreSQL, Redis가 필요하지 않습니다. 기억은
+`data/studyme.db`에 저장되며 `.env`와 함께 Git에 포함되지 않습니다.
+
+## Docker로 실행
+
+여러 PC나 서버에서 PostgreSQL·Redis 구성까지 동일하게 재현해야 할 때만 사용합니다.
 
 ```bash
 cp .env.example .env
@@ -43,14 +69,13 @@ Discord Developer Portal에서 봇의 **Message Content Intent**를 켜야 합�
 curl http://localhost:8080/health
 ```
 
-호스트에서 직접 실행:
+터미널에서 직접 실행하고 싶다면:
 
 ```bash
 python3.12 -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
-alembic upgrade head
-python -m app.main
+python scripts/local_launcher.py run
 ```
 
 ## 환경 변수
@@ -58,8 +83,8 @@ python -m app.main
 | 이름 | 설명 | 기본값 |
 |---|---|---|
 | `DISCORD_TOKEN` | Discord 봇 토큰 | 필수 |
-| `DATABASE_URL` | SQLAlchemy 비동기 PostgreSQL URL | 로컬 Compose |
-| `REDIS_URL` | Redis URL | `redis://localhost:6379/0` |
+| `DATABASE_URL` | 로컬 SQLite 또는 배포 PostgreSQL URL | 로컬 SQLite |
+| `REDIS_URL` | 선택형 Redis URL | 비어 있음 |
 | `LLM_PROVIDER` | `openai`, `gemini`, `grok`, `fake` | `openai` |
 | `WAKE_WORD` | 봇 호명어 | `스터디미야` |
 | `BOT_PERSONA_FILE` | 긴 UTF-8 페르소나 파일 | `persona.md` |

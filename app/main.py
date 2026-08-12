@@ -16,7 +16,7 @@ from app.llm.router import build_provider
 log = logging.getLogger(__name__)
 
 
-async def create_health_app(engine, redis: Redis) -> web.Application:
+async def create_health_app(engine, redis: Redis | None) -> web.Application:
     async def root(_: web.Request) -> web.Response:
         return web.json_response(
             {
@@ -31,14 +31,15 @@ async def create_health_app(engine, redis: Redis) -> web.Application:
         try:
             async with engine.connect() as connection:
                 await connection.execute(text("SELECT 1"))
-            checks["postgres"] = "ok"
+            checks["database"] = "ok"
         except Exception:
-            checks["postgres"] = "error"
-        try:
-            await redis.ping()
-            checks["redis"] = "ok"
-        except Exception:
-            checks["redis"] = "error"
+            checks["database"] = "error"
+        if redis is not None:
+            try:
+                await redis.ping()
+                checks["redis"] = "ok"
+            except Exception:
+                checks["redis"] = "error"
         ok = all(value == "ok" for value in checks.values())
         return web.json_response(
             {"status": "ok" if ok else "degraded", "checks": checks},
@@ -56,7 +57,9 @@ async def async_main() -> None:
     configure_logging(settings.log_level)
     engine = make_engine(settings.database_url)
     sessions = make_session_factory(engine)
-    redis = Redis.from_url(settings.redis_url, decode_responses=True)
+    redis = (
+        Redis.from_url(settings.redis_url, decode_responses=True) if settings.redis_url else None
+    )
 
     runner = web.AppRunner(await create_health_app(engine, redis))
     await runner.setup()
@@ -82,7 +85,8 @@ async def async_main() -> None:
     finally:
         if bot and not bot.is_closed():
             await bot.close()
-        await redis.aclose()
+        if redis is not None:
+            await redis.aclose()
         await engine.dispose()
         await runner.cleanup()
 

@@ -20,8 +20,8 @@ class Settings(BaseSettings):
     discord_application_id: int | None = None
     wake_word: str = "스터디미야"
 
-    database_url: str = "postgresql+asyncpg://studyme:studyme@localhost:5432/studyme"
-    redis_url: str = "redis://localhost:6379/0"
+    database_url: str = "sqlite+aiosqlite:///data/studyme.db"
+    redis_url: str = ""
 
     llm_provider: Literal["openai", "gemini", "grok", "fake"] = "openai"
     openai_api_key: SecretStr = SecretStr("")
@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     participation_judge_provider: Literal["llm", "ollama", "off"] = "llm"
     participation_reply_threshold: float = Field(default=0.78, ge=0.5, le=1)
     participation_react_threshold: float = Field(default=0.72, ge=0.5, le=1)
-    ollama_base_url: str = "http://host.docker.internal:11434"
+    ollama_base_url: str = "http://localhost:11434"
     ollama_participation_model: str = "qwen2.5:3b"
     recent_message_limit: int = Field(default=16, ge=4, le=50)
     memory_top_k: int = Field(default=6, ge=1, le=20)
