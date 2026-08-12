@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field, ValidationError
 
-from app.common.time import utcnow
+from app.common.time import as_utc, utcnow
 from app.llm.base import LLMProvider
 
 
@@ -68,7 +68,7 @@ class ParticipationService:
         if (
             item.last_partner_id == item.author_id
             and item.engaged_until is not None
-            and item.engaged_until > utcnow()
+            and as_utc(item.engaged_until) > utcnow()
         ):
             return ParticipationDecision(
                 ParticipationAction.REPLY, item.author_id, 0.78, "ongoing bot conversation"
@@ -125,7 +125,7 @@ class ParticipationJudge:
 
         cooldown_active = False
         if item.last_spontaneous_at is not None:
-            elapsed = (utcnow() - item.last_spontaneous_at).total_seconds()
+            elapsed = (utcnow() - as_utc(item.last_spontaneous_at)).total_seconds()
             cooldown_active = elapsed < self.spontaneous_cooldown_seconds
 
         system = """You decide whether a Discord message is directed at the AI bot.

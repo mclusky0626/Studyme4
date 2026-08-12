@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from app.common.time import utcnow
 from app.conversation.participation import (
@@ -49,6 +49,14 @@ def test_laughter_prefers_reaction():
 def test_active_partner_can_continue_without_wake_word():
     result = ParticipationService().decide(
         item(last_partner_id="1", engaged_until=utcnow() + timedelta(seconds=30))
+    )
+    assert result.action == ParticipationAction.REPLY
+
+
+def test_active_partner_with_sqlite_naive_datetime_can_continue():
+    future_without_timezone = datetime.now() + timedelta(seconds=30)
+    result = ParticipationService().decide(
+        item(last_partner_id="1", engaged_until=future_without_timezone)
     )
     assert result.action == ParticipationAction.REPLY
 
@@ -138,5 +146,29 @@ async def test_spontaneous_cooldown_blocks_merely_probable_interjection():
         bot_name="스터디미",
         author_name="민수",
         recent_messages=["민수: 여행지 추천 없나"],
+    )
+    assert result.action == ParticipationAction.IGNORE
+
+
+async def test_sqlite_naive_spontaneous_datetime_is_supported():
+    provider = FakeProvider(
+        json_responses=[
+            {
+                "action": "ignore",
+                "target_user_id": None,
+                "confidence": 0.99,
+                "reason": "human conversation",
+            }
+        ]
+    )
+    result = await ParticipationJudge(provider).judge(
+        item(
+            content="그건 어때",
+            last_spontaneous_at=datetime.now(),
+            auto_participation_enabled=True,
+        ),
+        bot_name="미유",
+        author_name="민수",
+        recent_messages=[],
     )
     assert result.action == ParticipationAction.IGNORE

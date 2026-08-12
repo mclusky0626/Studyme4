@@ -4,6 +4,7 @@ import math
 import re
 from datetime import UTC, datetime
 
+from app.common.time import as_utc
 from app.db.models import Memory
 from app.memory.schemas import RankedMemory
 
@@ -22,7 +23,7 @@ def rank_memories(query: str, memories: list[Memory], top_k: int) -> list[Ranked
         memory_tokens = _tokens(memory.content)
         union = query_tokens | memory_tokens
         lexical = len(query_tokens & memory_tokens) / len(union) if union else 0.0
-        age_days = max((now - memory.updated_at).total_seconds() / 86400, 0)
+        age_days = max((now - as_utc(memory.updated_at)).total_seconds() / 86400, 0)
         recency = math.exp(-age_days / 90)
         repeated = min(math.log1p(memory.recall_count) / 4, 1.0)
         explicit_bonus = 1.0 if memory.is_explicit else 0.45
