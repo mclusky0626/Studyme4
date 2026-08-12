@@ -1,0 +1,11 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+
+class LLMProvider(Protocol):
+    async def complete(self, *, system: str, user: str) -> str: ...
+
+    async def complete_json(self, *, system: str, user: str) -> dict: ...
+
+    async def embed(self, text: str) -> list[float] | None: ...

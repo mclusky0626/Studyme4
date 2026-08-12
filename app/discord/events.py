@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+import logging
+
+import discord
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.config import Settings
+from app.conversation.context_builder import ContextBuilder
+from app.conversation.participation import (
+    ParticipationAction,
+    ParticipationInput,
+    ParticipationService,
+)
+from app.conversation.response_generator import ResponseGenerator
+from app.conversation.state import ConversationStateRepository
+from app.db.models import ServerPolicy
+from app.discord.message_normalizer import MessageNormalizer
+from app.discord.response_sender import send_response
+from app.llm.base import LLMProvider
+from app.memory.extractor import MemoryExtractor
+from app.memory.privacy import MemoryScope
+from app.memory.repository import MemoryRepository, MessageRepository, UserRepository
+from app.memory.retrieval import MemoryRetriever
+from app.memory.schemas import ValidationContext
+from app.memory.service import MemoryService
+from app.memory.validator import MemoryRejected
+from app.persona.profile import PersonaProfile
+from app.relations.extractor import RelationshipExtractor
+from app.relations.repository import RelationshipRepository
+from app.relations.service import RelationshipService
+
+log = logging.getLogger(__name__)
+
+
+class DiscordEventHandler:
+    def __init__(
+        self,
+        *,
+        sessions: async_sessionmaker[AsyncSession],
+        settings: Settings,
+        provider: LLMProvider,
+    ):
+        self.sessions = sessions
+        self.settings = settings
+        self.provider = provider
+        self.normalizer = MessageNormalizer(settings.wake_word)
+        self.participation = ParticipationService()
+        self.response_generator = ResponseGenerator(provider)
+        self.memory_extractor = MemoryExtractor(provider)
+        self.relationship_extractor = RelationshipExtractor(provider)
+        self.profile = PersonaProfile(
+            name=settings.bot_name,
+            version=settings.persona_version,
+            speaking_style=settings.bot_persona,
+        )
+
+    async def handle(self, message: discord.Message, bot_user: discord.ClientUser) -> None:
+        if message.author.bot:
+            return
+        normalized = self.normalizer.normalize(message, bot_user)
+        scope = MemoryScope(
+            guild_id=normalized.guild_id,
+            channel_id=normalized.channel_id,
+            is_dm=normalized.is_dm,
+        )
+
+        async with self.sessions() as session, session.begin():
+            users = UserRepository(session)
+            author = await users.upsert(
+                normalized.author_discord_id,
+                normalized.author_name,
+                normalized.guild_id,
+            )
+            for mentioned in message.mentions:
+                await users.upsert(str(mentioned.id), mentioned.display_name, normalized.guild_id)
+            bot_identity = await users.upsert(
+                str(bot_user.id), bot_user.display_name, normalized.guild_id
+            )
+            stored_message = await MessageRepository(session).add(
+                discord_message_id=normalized.discord_message_id,
+                guild_id=normalized.guild_id,
+                channel_id=normalized.channel_id,
+                author_user_id=author.id,
+                reply_to_message_id=normalized.reply_to_message_id,
+                content=normalized.content,
+                created_at=normalized.created_at,
+                is_dm=normalized.is_dm,
+            )
+            state_repository = ConversationStateRepository(session)
+            state = await state_repository.get(normalized.channel_id)
+            server_policy = (
+                await session.scalar(
+                    select(ServerPolicy).where(ServerPolicy.guild_id == normalized.guild_id)
+                )
+                if normalized.guild_id
+                else None
+            )
+            auto_enabled = (
+                server_policy.auto_participation_enabled
+                if server_policy
+                else self.settings.auto_participation_enabled
+            )
+            decision = self.participation.decide(
+                ParticipationInput(
+                    author_id=normalized.author_discord_id,
+                    content=normalized.content,
+                    is_dm=normalized.is_dm,
+                    bot_mentioned=normalized.bot_mentioned,
+                    bot_replied_to=normalized.reply_to_bot,
+                    wake_word_used=normalized.wake_word_used,
+                    mentioned_user_ids=normalized.mentioned_user_ids,
+                    bot_user_id=str(bot_user.id),
+                    last_partner_id=state.last_partner_discord_id if state else None,
+                    engaged_until=state.engaged_until if state else None,
+                    auto_participation_enabled=auto_enabled,
+                )
+            )
+            if decision.action == ParticipationAction.REPLY:
+                context = await ContextBuilder(
+                    MessageRepository(session),
+                    MemoryRetriever(MemoryRepository(session)),
+                    RelationshipRepository(session),
+                ).build(
+                    query=normalized.content,
+                    scope=scope,
+                    relevant_user_ids=[author.id, bot_identity.id],
+                    recent_limit=self.settings.recent_message_limit,
+                    memory_top_k=self.settings.memory_top_k,
+                )
+            else:
+                context = None
+
+        if decision.action == ParticipationAction.IGNORE:
+            return
+        if decision.action == ParticipationAction.REACT:
+            try:
+                await message.add_reaction(decision.emoji or "👍")
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+            return
+        assert context is not None
+
+        try:
+            reply = await self.response_generator.generate(
+                author_name=normalized.author_name,
+                content=normalized.content,
+                context=context,
+                profile=self.profile,
+            )
+            sent = await send_response(message, reply or "ㅇㅇ")
+        except Exception:
+            log.exception("response generation failed")
+            await message.reply(
+                "지금 답 만들다가 오류 났어. 잠깐 뒤에 다시 불러줘.", mention_author=False
+            )
+            return
+
+        async with self.sessions() as session, session.begin():
+            users = UserRepository(session)
+            bot_identity = await users.upsert(
+                str(bot_user.id), bot_user.display_name, normalized.guild_id
+            )
+            await MessageRepository(session).add(
+                discord_message_id=str(sent.id),
+                guild_id=normalized.guild_id,
+                channel_id=normalized.channel_id,
+                author_user_id=bot_identity.id,
+                reply_to_message_id=normalized.discord_message_id,
+                content=reply,
+                created_at=sent.created_at,
+                is_dm=normalized.is_dm,
+            )
+            await ConversationStateRepository(session).mark_replied(
+                channel_id=normalized.channel_id,
+                guild_id=normalized.guild_id,
+                partner_discord_id=normalized.author_discord_id,
+                bot_message_id=str(sent.id),
+                engage_window_seconds=self.settings.engage_window_seconds,
+            )
+            if not self.settings.memory_extraction_enabled:
+                return
+            if server_policy and not server_policy.memory_enabled:
+                return
+            allowed_ids = {
+                normalized.author_discord_id,
+                str(bot_user.id),
+                *normalized.mentioned_user_ids,
+            }
+            try:
+                candidates = await self.memory_extractor.extract(
+                    author_discord_user_id=normalized.author_discord_id,
+                    author_name=normalized.author_name,
+                    content=(
+                        f"USER {normalized.author_name} ({normalized.author_discord_id}): "
+                        f"{normalized.content}\n"
+                        f"BOT {bot_user.display_name} ({bot_user.id}): {reply}"
+                    ),
+                    allowed_subject_ids=allowed_ids,
+                    is_dm=normalized.is_dm,
+                )
+                for candidate in candidates:
+                    subject = await users.by_discord_id(candidate.subject_discord_user_id)
+                    if subject is None:
+                        continue
+                    embedding = await self.provider.embed(candidate.content)
+                    try:
+                        await MemoryService(session).store_candidate(
+                            subject=subject,
+                            candidate=candidate,
+                            context=ValidationContext(
+                                author_discord_user_id=normalized.author_discord_id,
+                                guild_id=normalized.guild_id,
+                                channel_id=normalized.channel_id,
+                                is_dm=normalized.is_dm,
+                                source_message_id=stored_message.id,
+                            ),
+                            embedding=embedding,
+                        )
+                    except MemoryRejected as exc:
+                        log.info("memory candidate rejected: %s", exc)
+
+                if normalized.guild_id:
+                    relations = await self.relationship_extractor.extract(
+                        normalized.content, allowed_ids
+                    )
+                    for candidate in relations:
+                        user_a = await users.by_discord_id(candidate.user_a_discord_id)
+                        user_b = await users.by_discord_id(candidate.user_b_discord_id)
+                        if user_a and user_b:
+                            await RelationshipService(RelationshipRepository(session)).store(
+                                guild_id=normalized.guild_id,
+                                user_a=user_a,
+                                user_b=user_b,
+                                source_message_id=stored_message.id,
+                                candidate=candidate,
+                            )
+            except Exception:
+                # Memory extraction failure must not break an already-delivered reply.
+                log.exception("post-response memory extraction failed")

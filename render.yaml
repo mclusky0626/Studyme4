@@ -1,0 +1,40 @@
+services:
+  - type: web
+    name: studyme-memory-bot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    region: singapore
+    healthCheckPath: /health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: studyme-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: studyme-redis
+          property: connectionString
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: LLM_PROVIDER
+        value: openai
+      - key: PORT
+        value: 8080
+
+  - type: keyvalue
+    name: studyme-redis
+    plan: free
+    region: singapore
+    ipAllowList: []
+
+databases:
+  - name: studyme-postgres
+    plan: free
+    region: singapore
+    databaseName: studyme
+    user: studyme
