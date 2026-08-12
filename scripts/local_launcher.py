@@ -278,8 +278,19 @@ def run_bot(force_update: bool = False) -> None:
 
     heading("미유 실행 중")
     print("이 창을 닫거나 Ctrl+C를 누르면 미유가 종료돼.")
+    run_environment = os.environ.copy()
     try:
-        completed = subprocess.run([str(venv_python), "-m", "app.main"], cwd=ROOT)
+        ca_bundle = subprocess.check_output(
+            [str(venv_python), "-c", "import certifi; print(certifi.where())"], text=True
+        ).strip()
+        run_environment["SSL_CERT_FILE"] = ca_bundle
+        run_environment["REQUESTS_CA_BUNDLE"] = ca_bundle
+    except subprocess.SubprocessError:
+        pass
+    try:
+        completed = subprocess.run(
+            [str(venv_python), "-m", "app.main"], cwd=ROOT, env=run_environment
+        )
     except KeyboardInterrupt:
         print("\n미유를 종료했어.")
         return

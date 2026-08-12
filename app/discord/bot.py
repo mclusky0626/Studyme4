@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 
+import aiohttp
 import discord
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.common.ssl import trusted_ssl_context
 from app.config import Settings
 from app.discord.commands import register_commands
 from app.discord.events import DiscordEventHandler
@@ -29,6 +31,7 @@ class StudymeBot(commands.Bot):
             intents=intents,
             help_command=None,
             application_id=settings.discord_application_id,
+            connector=aiohttp.TCPConnector(ssl=trusted_ssl_context()),
         )
         self.settings = settings
         self.handler = DiscordEventHandler(sessions=sessions, settings=settings, provider=provider)
