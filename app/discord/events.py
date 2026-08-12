@@ -11,6 +11,7 @@ from app.conversation.context_builder import ContextBuilder
 from app.conversation.participation import (
     ParticipationAction,
     ParticipationInput,
+    ParticipationJudge,
     ParticipationService,
 )
 from app.conversation.response_generator import ResponseGenerator
@@ -19,6 +20,7 @@ from app.db.models import ServerPolicy
 from app.discord.message_normalizer import MessageNormalizer
 from app.discord.response_sender import send_response
 from app.llm.base import LLMProvider
+from app.llm.router import build_participation_provider
 from app.memory.extractor import MemoryExtractor
 from app.memory.privacy import MemoryScope
 from app.memory.repository import MemoryRepository, MessageRepository, UserRepository
@@ -47,13 +49,19 @@ class DiscordEventHandler:
         self.provider = provider
         self.normalizer = MessageNormalizer(settings.wake_word)
         self.participation = ParticipationService()
+        self.participation_judge = ParticipationJudge(
+            build_participation_provider(settings, provider),
+            reply_threshold=settings.participation_reply_threshold,
+            react_threshold=settings.participation_react_threshold,
+            spontaneous_cooldown_seconds=settings.spontaneous_cooldown_seconds,
+        )
         self.response_generator = ResponseGenerator(provider)
         self.memory_extractor = MemoryExtractor(provider)
         self.relationship_extractor = RelationshipExtractor(provider)
         self.profile = PersonaProfile(
             name=settings.bot_name,
             version=settings.persona_version,
-            speaking_style=settings.bot_persona,
+            speaking_style=settings.persona_text(),
         )
 
     async def handle(self, message: discord.Message, bot_user: discord.ClientUser) -> None:
@@ -114,23 +122,40 @@ class DiscordEventHandler:
                     bot_user_id=str(bot_user.id),
                     last_partner_id=state.last_partner_discord_id if state else None,
                     engaged_until=state.engaged_until if state else None,
+                    last_spontaneous_at=state.last_spontaneous_at if state else None,
                     auto_participation_enabled=auto_enabled,
                 )
             )
-            if decision.action == ParticipationAction.REPLY:
-                context = await ContextBuilder(
-                    MessageRepository(session),
-                    MemoryRetriever(MemoryRepository(session)),
-                    RelationshipRepository(session),
-                ).build(
-                    query=normalized.content,
-                    scope=scope,
-                    relevant_user_ids=[author.id, bot_identity.id],
-                    recent_limit=self.settings.recent_message_limit,
-                    memory_top_k=self.settings.memory_top_k,
-                )
-            else:
-                context = None
+            judge_history: list[str] = []
+            if decision.requires_judge:
+                recent = await MessageRepository(session).recent(scope, 8)
+                judge_history = [
+                    f"{row_user.current_display_name}: {row_message.content}"
+                    for row_message, row_user in recent
+                    if row_message.id != stored_message.id
+                ]
+
+        judged_participation = decision.requires_judge
+        if decision.requires_judge:
+            decision = await self.participation_judge.judge(
+                ParticipationInput(
+                    author_id=normalized.author_discord_id,
+                    content=normalized.content,
+                    is_dm=normalized.is_dm,
+                    bot_mentioned=normalized.bot_mentioned,
+                    bot_replied_to=normalized.reply_to_bot,
+                    wake_word_used=normalized.wake_word_used,
+                    mentioned_user_ids=normalized.mentioned_user_ids,
+                    bot_user_id=str(bot_user.id),
+                    last_partner_id=state.last_partner_discord_id if state else None,
+                    engaged_until=state.engaged_until if state else None,
+                    last_spontaneous_at=state.last_spontaneous_at if state else None,
+                    auto_participation_enabled=auto_enabled,
+                ),
+                bot_name=bot_user.display_name,
+                author_name=normalized.author_name,
+                recent_messages=judge_history,
+            )
 
         if decision.action == ParticipationAction.IGNORE:
             return
@@ -140,7 +165,19 @@ class DiscordEventHandler:
             except (discord.Forbidden, discord.HTTPException):
                 pass
             return
-        assert context is not None
+
+        async with self.sessions() as session, session.begin():
+            context = await ContextBuilder(
+                MessageRepository(session),
+                MemoryRetriever(MemoryRepository(session)),
+                RelationshipRepository(session),
+            ).build(
+                query=normalized.content,
+                scope=scope,
+                relevant_user_ids=[author.id, bot_identity.id],
+                recent_limit=self.settings.recent_message_limit,
+                memory_top_k=self.settings.memory_top_k,
+            )
 
         try:
             reply = await self.response_generator.generate(
@@ -149,7 +186,12 @@ class DiscordEventHandler:
                 context=context,
                 profile=self.profile,
             )
-            sent = await send_response(message, reply or "ㅇㅇ")
+            sent_bubbles = await send_response(
+                message,
+                reply or "ㅇㅇ",
+                max_bubbles=self.settings.response_max_bubbles,
+                max_chars=self.settings.response_bubble_max_chars,
+            )
         except Exception:
             log.exception("response generation failed")
             await message.reply(
@@ -162,22 +204,28 @@ class DiscordEventHandler:
             bot_identity = await users.upsert(
                 str(bot_user.id), bot_user.display_name, normalized.guild_id
             )
-            await MessageRepository(session).add(
-                discord_message_id=str(sent.id),
-                guild_id=normalized.guild_id,
-                channel_id=normalized.channel_id,
-                author_user_id=bot_identity.id,
-                reply_to_message_id=normalized.discord_message_id,
-                content=reply,
-                created_at=sent.created_at,
-                is_dm=normalized.is_dm,
-            )
+            reply_to_id = normalized.discord_message_id
+            for sent_bubble in sent_bubbles:
+                await MessageRepository(session).add(
+                    discord_message_id=str(sent_bubble.message.id),
+                    guild_id=normalized.guild_id,
+                    channel_id=normalized.channel_id,
+                    author_user_id=bot_identity.id,
+                    reply_to_message_id=reply_to_id,
+                    content=sent_bubble.text,
+                    created_at=sent_bubble.message.created_at,
+                    is_dm=normalized.is_dm,
+                )
+                reply_to_id = str(sent_bubble.message.id)
+            last_sent = sent_bubbles[-1].message
+            visible_reply = " ".join(bubble.text for bubble in sent_bubbles)
             await ConversationStateRepository(session).mark_replied(
                 channel_id=normalized.channel_id,
                 guild_id=normalized.guild_id,
                 partner_discord_id=normalized.author_discord_id,
-                bot_message_id=str(sent.id),
+                bot_message_id=str(last_sent.id),
                 engage_window_seconds=self.settings.engage_window_seconds,
+                spontaneous=judged_participation,
             )
             if not self.settings.memory_extraction_enabled:
                 return
@@ -195,7 +243,7 @@ class DiscordEventHandler:
                     content=(
                         f"USER {normalized.author_name} ({normalized.author_discord_id}): "
                         f"{normalized.content}\n"
-                        f"BOT {bot_user.display_name} ({bot_user.id}): {reply}"
+                        f"BOT {bot_user.display_name} ({bot_user.id}): {visible_reply}"
                     ),
                     allowed_subject_ids=allowed_ids,
                     is_dm=normalized.is_dm,

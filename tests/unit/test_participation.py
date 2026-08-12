@@ -4,8 +4,10 @@ from app.common.time import utcnow
 from app.conversation.participation import (
     ParticipationAction,
     ParticipationInput,
+    ParticipationJudge,
     ParticipationService,
 )
+from app.llm.fake_provider import FakeProvider
 
 
 def item(**overrides):
@@ -53,4 +55,88 @@ def test_active_partner_can_continue_without_wake_word():
 
 def test_uncertain_message_is_silent():
     result = ParticipationService().decide(item(content="오늘 뭐 먹지"))
+    assert result.action == ParticipationAction.IGNORE
+
+
+def test_ambiguous_message_requests_judge_when_enabled():
+    result = ParticipationService().decide(
+        item(content="아까 말한 거 다시 알려줘", auto_participation_enabled=True)
+    )
+    assert result.action == ParticipationAction.IGNORE
+    assert result.requires_judge is True
+
+
+async def test_contextual_judge_can_detect_implicit_bot_conversation():
+    provider = FakeProvider(
+        json_responses=[
+            {
+                "action": "reply",
+                "target_user_id": "1",
+                "confidence": 0.93,
+                "reason": "the author is answering the bot's previous question",
+            }
+        ]
+    )
+    result = await ParticipationJudge(provider).judge(
+        item(content="응 그걸로 해줘", auto_participation_enabled=True),
+        bot_name="스터디미",
+        author_name="민수",
+        recent_messages=["스터디미: 돼지국밥 쪽으로 찾아볼까?", "민수: 응 그걸로 해줘"],
+    )
+    assert result.action == ParticipationAction.REPLY
+    assert result.confidence == 0.93
+
+
+async def test_contextual_judge_rejects_low_confidence_reply():
+    provider = FakeProvider(
+        json_responses=[
+            {
+                "action": "reply",
+                "target_user_id": "1",
+                "confidence": 0.55,
+                "reason": "possibly directed at the bot",
+            }
+        ]
+    )
+    result = await ParticipationJudge(provider).judge(
+        item(content="뭐 먹지", auto_participation_enabled=True),
+        bot_name="스터디미",
+        author_name="민수",
+        recent_messages=["철수: 배고프다", "민수: 뭐 먹지"],
+    )
+    assert result.action == ParticipationAction.IGNORE
+
+
+async def test_contextual_judge_fails_silent_when_disabled():
+    result = await ParticipationJudge(None).judge(
+        item(content="그건 어때", auto_participation_enabled=True),
+        bot_name="스터디미",
+        author_name="민수",
+        recent_messages=[],
+    )
+    assert result.action == ParticipationAction.IGNORE
+
+
+async def test_spontaneous_cooldown_blocks_merely_probable_interjection():
+    provider = FakeProvider(
+        json_responses=[
+            {
+                "action": "reply",
+                "target_user_id": "1",
+                "confidence": 0.9,
+                "reason": "the bot could add something useful",
+            }
+        ]
+    )
+    result = await ParticipationJudge(provider).judge(
+        item(
+            content="여행지 추천 없나",
+            last_partner_id="2",
+            last_spontaneous_at=utcnow(),
+            auto_participation_enabled=True,
+        ),
+        bot_name="스터디미",
+        author_name="민수",
+        recent_messages=["민수: 여행지 추천 없나"],
+    )
     assert result.action == ParticipationAction.IGNORE

@@ -29,3 +29,18 @@ def build_provider(settings: Settings) -> LLMProvider:
         chat_model=settings.grok_chat_model,
         base_url="https://api.x.ai/v1",
     )
+
+
+def build_participation_provider(
+    settings: Settings, default_provider: LLMProvider
+) -> LLMProvider | None:
+    if settings.participation_judge_provider == "off":
+        return None
+    if settings.participation_judge_provider == "llm":
+        return default_provider
+    base_url = settings.ollama_base_url.rstrip("/") + "/v1"
+    return OpenAICompatibleProvider(
+        api_key="ollama",
+        chat_model=settings.ollama_participation_model,
+        base_url=base_url,
+    )

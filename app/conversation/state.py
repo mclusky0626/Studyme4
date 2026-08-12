@@ -26,6 +26,7 @@ class ConversationStateRepository:
         partner_discord_id: str,
         bot_message_id: str,
         engage_window_seconds: int,
+        spontaneous: bool = False,
     ) -> ChannelState:
         state = await self.get(channel_id)
         if state is None:
@@ -34,4 +35,6 @@ class ConversationStateRepository:
         state.last_partner_discord_id = partner_discord_id
         state.last_bot_message_id = bot_message_id
         state.engaged_until = utcnow() + timedelta(seconds=engage_window_seconds)
+        if spontaneous:
+            state.last_spontaneous_at = utcnow()
         return state

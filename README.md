@@ -8,7 +8,9 @@ Discord 단체 채팅에서 사람·사건·취향·약속·관계 변화를 출
 ## 현재 구현된 MVP
 
 - 멘션, DM, 봇 답장, `WAKE_WORD` 호명어 응답
-- 다른 사람 멘션 시 침묵, 웃음 메시지에는 반응, 불확실할 때 침묵
+- 접두사 없는 메시지도 최근 흐름을 LLM 또는 Ollama가 판단해 `reply/react/ignore`
+- 답변의 의미 단위를 사람처럼 최대 4개의 Discord 말풍선으로 분리
+- Markdown 파일로 관리하는 길고 구체적인 페르소나
 - 채널별 최근 대화와 참여 상태 PostgreSQL 영속화
 - 유저·메시지·기억·수정 이력·관계·관계 이벤트·대화 요약 모델
 - `guild`, `channel`, `dm_private`, `user_private` 공개 범위
@@ -16,11 +18,12 @@ Discord 단체 채팅에서 사람·사건·취향·약속·관계 변화를 출
 - 별도 LLM 기억 후보 추출기와 민감정보·근거·추론 검증기
 - 중복 갱신, 충돌 시 `superseded` 또는 `disputed`, 수정 이력 보존
 - OpenAI, Gemini, Grok 호환 제공자와 테스트용 가짜 제공자
-- `/기억보기`, `/기억검색`, `/기억수정`, `/기억삭제`, `/나를잊어`, `/기억끄기`, `/기억켜기`, `/서버기억설정`, `/봇정보`
+- `/기억보기`, `/기억검색`, `/기억수정`, `/기억삭제`, `/나를잊어`, `/기억끄기`, `/기억켜기`, `/서버기억설정`, `/서버참여설정`, `/봇정보`
 - `/health` PostgreSQL·Redis 상태 확인
 - 실제 AI/Discord API를 호출하지 않는 자동 테스트
 
-첫 버전은 텍스트 기억 정확도에 집중합니다. 이미지 장기 기억과 자발적 끼어들기의 LLM 판단은 안전한 기본값으로 꺼져 있습니다.
+첫 버전은 텍스트 기억 정확도에 집중합니다. 이미지 장기 기억은 비활성화되어 있고,
+접두사 없는 참여 판단은 확신이 낮거나 판단 모델이 실패하면 침묵합니다.
 
 ## 빠른 시작
 
@@ -59,11 +62,46 @@ python -m app.main
 | `REDIS_URL` | Redis URL | `redis://localhost:6379/0` |
 | `LLM_PROVIDER` | `openai`, `gemini`, `grok`, `fake` | `openai` |
 | `WAKE_WORD` | 봇 호명어 | `스터디미야` |
+| `BOT_PERSONA_FILE` | 긴 UTF-8 페르소나 파일 | `persona.md` |
+| `BOT_PERSONA` | 파일이 없을 때 사용할 문자열 페르소나 | 기본 말투 |
 | `MEMORY_EXTRACTION_ENABLED` | 응답 후 기억 후보 추출 | `true` |
-| `AUTO_PARTICIPATION_ENABLED` | 자발적 참여 판단 허용 | `false` |
+| `AUTO_PARTICIPATION_ENABLED` | 접두사 없는 참여 판단 허용 | `true` |
+| `PARTICIPATION_JUDGE_PROVIDER` | `llm`, `ollama`, `off` | `llm` |
+| `OLLAMA_PARTICIPATION_MODEL` | 참여 판단 전용 로컬 모델 | `qwen2.5:3b` |
+| `RESPONSE_MAX_BUBBLES` | 답변당 최대 말풍선 수 | `4` |
 | `RUN_BOT` | `false`면 상태 서버만 실행 | `true` |
 
 모든 비밀값은 배포 서비스의 환경 변수로 주입합니다. `.env`, 런타임 데이터와 로그는 Git에서 제외됩니다.
+
+## 긴 페르소나 편집
+
+기본 [persona.md](persona.md)를 원하는 만큼 길게 편집하면 재시작할 때 적용됩니다. 정체성,
+말투, 성격, 관심사, 유저별 태도와 금지 행동을 Markdown 제목으로 나누어 적을 수 있습니다.
+파일 대신 환경 변수 한 줄만 쓰려면 `BOT_PERSONA_FILE=`로 비우고 `BOT_PERSONA`를 설정하세요.
+
+## 접두사 없는 대화 감지
+
+기본값 `PARTICIPATION_JUDGE_PROVIDER=llm`은 현재 대화 모델을 작은 추가 판단 호출에도
+사용합니다. 로컬 Ollama로 비용을 분리하려면 호스트에서 다음을 실행하세요.
+
+```bash
+ollama pull qwen2.5:3b
+# .env
+PARTICIPATION_JUDGE_PROVIDER=ollama
+OLLAMA_BASE_URL=http://host.docker.internal:11434
+OLLAMA_PARTICIPATION_MODEL=qwen2.5:3b
+```
+
+명시적인 DM·멘션·답장·호명은 모델 호출 없이 즉시 답합니다. 다른 유저 멘션은 즉시
+무시하고, 그 외 애매한 메시지만 최근 8개 발언과 직전 대화 상대를 보고 판단합니다.
+판단 결과가 설정된 신뢰도보다 낮거나 Ollama가 꺼져 있으면 답하지 않습니다. 서버
+관리자는 `/서버참여설정`으로 이 기능을 서버별로 끌 수 있습니다.
+
+## 여러 말풍선 답변
+
+응답 모델은 자연스러운 경계에 `[[BUBBLE]]`을 넣고, 전송기가 이를 제거한 뒤 별도 Discord
+메시지로 보냅니다. 모델이 경계를 누락해도 긴 답변은 문장과 길이를 기준으로 안전하게
+분할합니다. `RESPONSE_MAX_BUBBLES`와 `RESPONSE_BUBBLE_MAX_CHARS`로 조절할 수 있습니다.
 
 ## 데이터 경계
 

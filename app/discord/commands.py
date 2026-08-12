@@ -133,6 +133,29 @@ def register_commands(
             f"이 서버의 기억 기능을 {'켰어' if enabled else '껐어'}.", ephemeral=True
         )
 
+    @tree.command(name="서버참여설정", description="접두사 없는 대화 참여 판단을 설정합니다")
+    async def server_participation_policy(interaction: discord.Interaction, enabled: bool) -> None:
+        if interaction.guild_id is None:
+            await interaction.response.send_message("서버에서만 쓸 수 있어.", ephemeral=True)
+            return
+        permissions = getattr(interaction.user, "guild_permissions", None)
+        if not permissions or not permissions.manage_guild:
+            await interaction.response.send_message("서버 관리 권한이 필요해.", ephemeral=True)
+            return
+        guild_id = str(interaction.guild_id)
+        async with sessions() as session, session.begin():
+            policy = await session.scalar(
+                select(ServerPolicy).where(ServerPolicy.guild_id == guild_id)
+            )
+            if policy is None:
+                policy = ServerPolicy(guild_id=guild_id)
+                session.add(policy)
+            policy.auto_participation_enabled = enabled
+        await interaction.response.send_message(
+            f"접두사 없는 대화 참여 판단을 {'켰어' if enabled else '껐어'}.",
+            ephemeral=True,
+        )
+
     @tree.command(name="봇정보", description="봇의 기억·개인정보 원칙을 봅니다")
     async def bot_info(interaction: discord.Interaction) -> None:
         await interaction.response.send_message(
