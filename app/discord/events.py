@@ -10,6 +10,7 @@ from app.config import Settings
 from app.conversation.context_builder import ContextBuilder
 from app.conversation.participation import (
     ParticipationAction,
+    ParticipationDecision,
     ParticipationInput,
     ParticipationJudge,
     ParticipationService,
@@ -19,6 +20,10 @@ from app.conversation.state import ConversationStateRepository
 from app.db.models import ServerPolicy
 from app.discord.message_normalizer import MessageNormalizer
 from app.discord.response_sender import send_response
+from app.images.intent import is_image_recall_request
+from app.images.repository import ImageRepository
+from app.images.service import ImageArchiveService
+from app.images.storage import LocalImageStorage
 from app.llm.base import LLMProvider
 from app.llm.router import build_participation_provider
 from app.memory.extractor import MemoryExtractor
@@ -62,6 +67,14 @@ class DiscordEventHandler:
             name=settings.bot_name,
             version=settings.persona_version,
             speaking_style=settings.persona_text(),
+        )
+        self.image_storage = LocalImageStorage(settings.image_storage_dir)
+        self.image_archive = ImageArchiveService(
+            sessions=sessions,
+            provider=provider,
+            storage=self.image_storage,
+            max_bytes=settings.image_max_bytes,
+            analyze=settings.image_analysis_enabled,
         )
 
     async def handle(self, message: discord.Message, bot_user: discord.ClientUser) -> None:
@@ -135,8 +148,31 @@ class DiscordEventHandler:
                     if row_message.id != stored_message.id
                 ]
 
+        archived_images = []
+        if self.settings.image_storage_enabled and message.attachments:
+            archived_images = await self.image_archive.archive_attachments(
+                message.attachments,
+                owner_user_id=author.id,
+                source_message_id=stored_message.id,
+                discord_message_id=normalized.discord_message_id,
+                guild_id=normalized.guild_id,
+                channel_id=normalized.channel_id,
+                message_text=normalized.content,
+            )
+
+        recall_request = is_image_recall_request(normalized.content) and not (
+            normalized.mentioned_user_ids - {str(bot_user.id)}
+        )
+        if recall_request:
+            decision = ParticipationDecision(
+                ParticipationAction.REPLY,
+                normalized.author_discord_id,
+                1.0,
+                "explicit image recall request",
+            )
+
         judged_participation = decision.requires_judge
-        if decision.requires_judge:
+        if decision.requires_judge and not recall_request:
             decision = await self.participation_judge.judge(
                 ParticipationInput(
                     author_id=normalized.author_discord_id,
@@ -166,13 +202,28 @@ class DiscordEventHandler:
                 pass
             return
 
+        recalled_images = []
+        if recall_request:
+            async with self.sessions() as session, session.begin():
+                recalled_images = await ImageRepository(session).search(
+                    scope=scope,
+                    query=normalized.content,
+                    limit=self.settings.image_recall_limit,
+                    owner_user_id=author.id,
+                )
+
+        image_context = "\n".join(f"- {image.description}" for image in archived_images)
+        content_for_model = normalized.content
+        if image_context:
+            content_for_model += f"\n\n[방금 첨부된 이미지 분석]\n{image_context}"
+
         async with self.sessions() as session, session.begin():
             context = await ContextBuilder(
                 MessageRepository(session),
                 MemoryRetriever(MemoryRepository(session)),
                 RelationshipRepository(session),
             ).build(
-                query=normalized.content,
+                query=content_for_model,
                 scope=scope,
                 relevant_user_ids=[author.id, bot_identity.id],
                 recent_limit=self.settings.recent_message_limit,
@@ -180,18 +231,32 @@ class DiscordEventHandler:
             )
 
         try:
-            reply = await self.response_generator.generate(
-                author_name=normalized.author_name,
-                content=normalized.content,
-                context=context,
-                profile=self.profile,
-            )
+            if recall_request:
+                reply = (
+                    f"찾았어. 관련 있어 보이는 사진 {len(recalled_images)}개 가져왔어."
+                    if recalled_images
+                    else "저장된 사진에서 그 내용과 맞는 걸 못 찾았어."
+                )
+            else:
+                reply = await self.response_generator.generate(
+                    author_name=normalized.author_name,
+                    content=content_for_model,
+                    context=context,
+                    profile=self.profile,
+                )
             sent_bubbles = await send_response(
                 message,
                 reply or "ㅇㅇ",
                 max_bubbles=self.settings.response_max_bubbles,
                 max_chars=self.settings.response_bubble_max_chars,
             )
+            for image in recalled_images:
+                try:
+                    await message.channel.send(
+                        file=discord.File(image.stored_path, filename=image.original_filename)
+                    )
+                except (FileNotFoundError, discord.Forbidden, discord.HTTPException):
+                    log.exception("failed to resend archived image %s", image.id)
         except Exception:
             log.exception("response generation failed")
             await message.reply(

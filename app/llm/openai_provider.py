@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 
@@ -69,3 +70,33 @@ class OpenAICompatibleProvider:
             return None
         response = await self.client.embeddings.create(model=self.embedding_model, input=text)
         return response.data[0].embedding
+
+    async def describe_image(self, *, data: bytes, content_type: str, prompt: str) -> str:
+        encoded = base64.b64encode(data).decode("ascii")
+        response = await self.client.chat.completions.create(
+            model=self.chat_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "첨부 이미지를 나중에 한국어로 검색할 수 있도록 사실적으로 설명해. "
+                        "보이는 사람·사물·장소·색·행동·분위기와 읽을 수 있는 글자를 포함하되, "
+                        "확실하지 않은 신원이나 민감한 특성은 추측하지 마."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{content_type};base64,{encoded}",
+                                "detail": "low",
+                            },
+                        },
+                    ],
+                },
+            ],
+        )
+        return (response.choices[0].message.content or "").strip()

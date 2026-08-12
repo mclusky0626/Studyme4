@@ -123,6 +123,45 @@ class Message(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class ImageMemory(Base):
+    __tablename__ = "image_memories"
+    __table_args__ = (
+        UniqueConstraint("discord_attachment_id", name="uq_image_discord_attachment_id"),
+        Index(
+            "ix_image_memories_scope",
+            "guild_id",
+            "channel_id",
+            "visibility",
+            "created_at",
+        ),
+        Index("ix_image_memories_owner_created", "owner_user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    owner_user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    source_message_id: Mapped[str] = mapped_column(
+        ForeignKey("messages.id", ondelete="CASCADE"), index=True
+    )
+    discord_attachment_id: Mapped[str] = mapped_column(String(32))
+    guild_id: Mapped[str | None] = mapped_column(String(32), index=True)
+    channel_id: Mapped[str] = mapped_column(String(32), index=True)
+    visibility: Mapped[str] = mapped_column(String(20), nullable=False)
+    original_filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    stored_path: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), index=True)
+    description: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    recall_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_recalled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Memory(Base, TimestampMixin):
     __tablename__ = "memories"
     __table_args__ = (
