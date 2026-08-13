@@ -34,3 +34,15 @@ def test_valid_bold_is_preserved():
     assert split_response_bubbles("이건 **고풍스러운 일러스트** 같아.") == [
         "이건 **고풍스러운 일러스트** 같아."
     ]
+
+
+def test_spaces_inside_bold_markers_are_repaired():
+    assert split_response_bubbles("타냐가 나오는 **유녀전기 ** 얘기야.") == [
+        "타냐가 나오는 **유녀전기** 얘기야."
+    ]
+
+
+def test_particle_spacing_left_by_bad_marker_is_repaired():
+    assert split_response_bubbles("알고 보면 [[전생 **에 직장인이었어.") == [
+        "알고 보면 전생에 직장인이었어."
+    ]

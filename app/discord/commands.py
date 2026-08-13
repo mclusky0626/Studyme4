@@ -12,6 +12,7 @@ from app.config import Settings
 from app.db.models import ServerPolicy, User
 from app.images.repository import ImageRepository
 from app.images.storage import LocalImageStorage
+from app.memory.display import format_memory_overview
 from app.memory.privacy import MemoryScope
 from app.memory.repository import MemoryRepository, UserRepository
 from app.memory.service import MemoryService
@@ -42,18 +43,24 @@ def register_commands(
             is_dm=interaction.guild_id is None,
         )
 
+    async def owned_memory_text(session: AsyncSession, interaction: discord.Interaction) -> str:
+        user = await current_user(session, interaction)
+        memories = await MemoryRepository(session).list_owned(user.id)
+        return format_memory_overview(
+            memories,
+            memory_enabled=user.memory_enabled,
+        )
+
     @tree.command(name="기억보기", description="나에 대해 저장된 기억을 봅니다")
     async def memory_list(interaction: discord.Interaction) -> None:
         async with sessions() as session, session.begin():
-            user = await current_user(session, interaction)
-            memories = await MemoryRepository(session).list_owned(user.id)
-            if not memories:
-                text = "저장된 기억이 없어."
-            else:
-                text = "\n".join(
-                    f"`{memory.id[:8]}` [{memory.status}] {_short(memory.content)}"
-                    for memory in memories[:20]
-                )
+            text = await owned_memory_text(session, interaction)
+        await interaction.response.send_message(text[:1900], ephemeral=True)
+
+    @tree.command(name="기억정보", description="기억 저장 상태와 저장된 장기 기억을 봅니다")
+    async def memory_info(interaction: discord.Interaction) -> None:
+        async with sessions() as session, session.begin():
+            text = await owned_memory_text(session, interaction)
         await interaction.response.send_message(text[:1900], ephemeral=True)
 
     @tree.command(name="기억검색", description="내 기억에서 단어를 검색합니다")

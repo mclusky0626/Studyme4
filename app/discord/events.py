@@ -26,6 +26,7 @@ from app.images.service import ImageArchiveService
 from app.images.storage import LocalImageStorage
 from app.llm.base import LLMProvider
 from app.llm.router import build_participation_provider
+from app.memory.display import format_memory_overview
 from app.memory.extractor import MemoryExtractor
 from app.memory.privacy import MemoryScope
 from app.memory.repository import MemoryRepository, MessageRepository, UserRepository
@@ -159,6 +160,16 @@ class DiscordEventHandler:
                 channel_id=normalized.channel_id,
                 message_text=normalized.content,
             )
+
+        if normalized.content.casefold() in {"/기억정보", "/기억보기"}:
+            async with self.sessions() as session, session.begin():
+                memories = await MemoryRepository(session).list_owned(author.id)
+                text = format_memory_overview(
+                    memories,
+                    memory_enabled=author.memory_enabled,
+                )
+            await message.reply(text[:1900], mention_author=False)
+            return
 
         recall_request = is_image_recall_request(normalized.content) and not (
             normalized.mentioned_user_ids - {str(bot_user.id)}

@@ -10,6 +10,8 @@ _BUBBLE_BOUNDARY = re.compile(r"\s*(?:\[\[BUBBLE\]\]|<BUBBLE>|\[BUBBLE\])\s*|\n+
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。！？])\s+")
 _STRAY_BRACKETS = re.compile(r"\[\[|\]\]")
 _EXTRA_HORIZONTAL_SPACE = re.compile(r"[ \t]{2,}")
+_SPACED_BOLD = re.compile(r"\*\*\s*([^*\n]+?)\s+\*\*")
+_SPACED_KOREAN_PARTICLE = re.compile(r"(?<=[가-힣])\s+([은는이가을를에도의와과로])(?=\s|[,.!?])")
 
 
 @dataclass(slots=True)
@@ -21,12 +23,14 @@ class SentBubble:
 def _clean_discord_fragment(value: str) -> str:
     """Remove malformed model-only markers while preserving valid Discord Markdown."""
     cleaned = _STRAY_BRACKETS.sub("", value).strip()
+    cleaned = _SPACED_BOLD.sub(lambda match: f"**{match.group(1).strip()}**", cleaned)
     if cleaned.count("**") % 2:
         cleaned = cleaned.replace("**", "")
     if cleaned.count("__") % 2:
         cleaned = cleaned.replace("__", "")
     if cleaned.count("`") % 2:
         cleaned = cleaned.replace("`", "")
+    cleaned = _SPACED_KOREAN_PARTICLE.sub(r"\1", cleaned)
     return _EXTRA_HORIZONTAL_SPACE.sub(" ", cleaned).strip()
 
 
