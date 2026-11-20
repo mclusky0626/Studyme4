@@ -1,4 +1,4 @@
-# Studyme Memory Bot v2
+# Studyme Memory Bot v4 - this is no longer supported. only Studyme2, 3 and New 5 is useable
 
 [![CI](https://github.com/mclusky0626/Studyme4/actions/workflows/ci.yml/badge.svg)](https://github.com/mclusky0626/Studyme4/actions/workflows/ci.yml)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fmclusky0626%2FStudyme4)
