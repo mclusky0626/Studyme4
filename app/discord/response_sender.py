@@ -8,12 +8,30 @@ import discord
 
 _BUBBLE_BOUNDARY = re.compile(r"\s*(?:\[\[BUBBLE\]\]|<BUBBLE>|\[BUBBLE\])\s*|\n+", re.IGNORECASE)
 _SENTENCE_BOUNDARY = re.compile(r"(?<=[.!?。！？])\s+")
+_STRAY_BRACKETS = re.compile(r"\[\[|\]\]")
+_EXTRA_HORIZONTAL_SPACE = re.compile(r"[ \t]{2,}")
+_SPACED_BOLD = re.compile(r"\*\*\s*([^*\n]+?)\s+\*\*")
+_SPACED_KOREAN_PARTICLE = re.compile(r"(?<=[가-힣])\s+([은는이가을를에도의와과로])(?=\s|[,.!?])")
 
 
 @dataclass(slots=True)
 class SentBubble:
     message: discord.Message
     text: str
+
+
+def _clean_discord_fragment(value: str) -> str:
+    """Remove malformed model-only markers while preserving valid Discord Markdown."""
+    cleaned = _STRAY_BRACKETS.sub("", value).strip()
+    cleaned = _SPACED_BOLD.sub(lambda match: f"**{match.group(1).strip()}**", cleaned)
+    if cleaned.count("**") % 2:
+        cleaned = cleaned.replace("**", "")
+    if cleaned.count("__") % 2:
+        cleaned = cleaned.replace("__", "")
+    if cleaned.count("`") % 2:
+        cleaned = cleaned.replace("`", "")
+    cleaned = _SPACED_KOREAN_PARTICLE.sub(r"\1", cleaned)
+    return _EXTRA_HORIZONTAL_SPACE.sub(" ", cleaned).strip()
 
 
 def _hard_wrap(value: str, max_chars: int) -> list[str]:
@@ -33,7 +51,11 @@ def _hard_wrap(value: str, max_chars: int) -> list[str]:
 def split_response_bubbles(text: str, *, max_bubbles: int = 4, max_chars: int = 700) -> list[str]:
     """Parse model bubble markers and keep every Discord message comfortably sized."""
     value = text.strip() or "ㅇㅇ"
-    parts = [part.strip() for part in _BUBBLE_BOUNDARY.split(value) if part.strip()]
+    parts = [
+        cleaned
+        for part in _BUBBLE_BOUNDARY.split(value)
+        if (cleaned := _clean_discord_fragment(part))
+    ]
 
     # If a model ignored the explicit marker, split only an unusually long response.
     if len(parts) == 1 and len(parts[0]) > max_chars:

@@ -12,7 +12,7 @@ dist/
 build/
 *.egg-info/
 data/
-images/
+/images/
 logs/
 *.db
 *.sqlite*

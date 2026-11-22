@@ -20,3 +20,29 @@ def test_long_ignored_marker_response_is_safely_wrapped():
     result = split_response_bubbles(text, max_chars=25)
     assert len(result) >= 2
     assert all(len(part) <= 50 for part in result)
+
+
+def test_malformed_brackets_and_unbalanced_bold_are_cleaned():
+    result = split_response_bubbles(
+        "[[유녀전기 ** 일러스트네.\n[[분위기 ** 엄청 고풍스럽고 멋지다."
+    )
+    assert result == ["유녀전기 일러스트네.", "분위기 엄청 고풍스럽고 멋지다."]
+    assert all("[[" not in part and "**" not in part for part in result)
+
+
+def test_valid_bold_is_preserved():
+    assert split_response_bubbles("이건 **고풍스러운 일러스트** 같아.") == [
+        "이건 **고풍스러운 일러스트** 같아."
+    ]
+
+
+def test_spaces_inside_bold_markers_are_repaired():
+    assert split_response_bubbles("타냐가 나오는 **유녀전기 ** 얘기야.") == [
+        "타냐가 나오는 **유녀전기** 얘기야."
+    ]
+
+
+def test_particle_spacing_left_by_bad_marker_is_repaired():
+    assert split_response_bubbles("알고 보면 [[전생 **에 직장인이었어.") == [
+        "알고 보면 전생에 직장인이었어."
+    ]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.memory.privacy import MemoryScope
 from app.memory.repository import MessageRepository
@@ -13,6 +13,7 @@ class ConversationContext:
     recent_messages: list[str]
     memories: list[str]
     relationships: list[str]
+    image_descriptions: list[str] = field(default_factory=list)
 
 
 class ContextBuilder:

@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     response_max_bubbles: int = Field(default=4, ge=1, le=8)
     response_bubble_max_chars: int = Field(default=700, ge=80, le=1900)
 
+    image_storage_enabled: bool = True
+    image_storage_dir: str = "data/images"
+    image_analysis_enabled: bool = True
+    image_max_bytes: int = Field(default=25 * 1024 * 1024, ge=1024)
+    image_recall_limit: int = Field(default=3, ge=1, le=10)
+
     run_bot: bool = True
     health_host: str = "0.0.0.0"
     port: int = Field(default=8080, ge=1, le=65535)

@@ -18,11 +18,11 @@ Discord 단체 채팅에서 사람·사건·취향·약속·관계 변화를 출
 - 별도 LLM 기억 후보 추출기와 민감정보·근거·추론 검증기
 - 중복 갱신, 충돌 시 `superseded` 또는 `disputed`, 수정 이력 보존
 - OpenAI, Gemini, Grok 호환 제공자와 테스트용 가짜 제공자
-- `/기억보기`, `/기억검색`, `/기억수정`, `/기억삭제`, `/나를잊어`, `/기억끄기`, `/기억켜기`, `/서버기억설정`, `/서버참여설정`, `/봇정보`
+- Discord 이미지 원본 자동 로컬 저장, AI 장면·문자 설명, 자연어 검색과 원본 재전송
+- `/기억보기`, `/기억검색`, `/기억수정`, `/기억삭제`, `/나를잊어`, `/기억끄기`, `/기억켜기`, `/사진목록`, `/사진검색`, `/사진보기`, `/사진삭제`, `/서버기억설정`, `/서버참여설정`, `/봇정보`
 - `/health` PostgreSQL·Redis 상태 확인
 - 실제 AI/Discord API를 호출하지 않는 자동 테스트
 
-첫 버전은 텍스트 기억 정확도에 집중합니다. 이미지 장기 기억은 비활성화되어 있고,
 접두사 없는 참여 판단은 확신이 낮거나 판단 모델이 실패하면 침묵합니다.
 
 ## 맥에서 가장 쉽게 실행
@@ -49,7 +49,7 @@ brew install python@3.12
 ```
 
 이 로컬 구동 방식에는 Docker, PostgreSQL, Redis가 필요하지 않습니다. 기억은
-`data/studyme.db`에 저장되며 `.env`와 함께 Git에 포함되지 않습니다.
+`data/studyme.db`, 사진 원본은 `data/images`에 저장되며 `.env`와 함께 Git에 포함되지 않습니다.
 
 ## Docker로 실행
 
@@ -94,6 +94,11 @@ python scripts/local_launcher.py run
 | `PARTICIPATION_JUDGE_PROVIDER` | `llm`, `ollama`, `off` | `llm` |
 | `OLLAMA_PARTICIPATION_MODEL` | 참여 판단 전용 로컬 모델 | `qwen2.5:3b` |
 | `RESPONSE_MAX_BUBBLES` | 답변당 최대 말풍선 수 | `4` |
+| `IMAGE_STORAGE_ENABLED` | Discord 이미지 원본 자동 저장 | `true` |
+| `IMAGE_STORAGE_DIR` | 사진 원본을 저장할 로컬 폴더 | `data/images` |
+| `IMAGE_ANALYSIS_ENABLED` | 대화 모델로 검색용 이미지 설명 생성 | `true` |
+| `IMAGE_MAX_BYTES` | 이미지 한 장의 저장 상한(바이트) | `26214400` |
+| `IMAGE_RECALL_LIMIT` | 한 번에 다시 보낼 사진 수 | `3` |
 | `RUN_BOT` | `false`면 상태 서버만 실행 | `true` |
 
 모든 비밀값은 배포 서비스의 환경 변수로 주입합니다. `.env`, 런타임 데이터와 로그는 Git에서 제외됩니다.
@@ -128,6 +133,25 @@ OLLAMA_PARTICIPATION_MODEL=qwen2.5:3b
 메시지로 보냅니다. 모델이 경계를 누락해도 긴 답변은 문장과 길이를 기준으로 안전하게
 분할합니다. `RESPONSE_MAX_BUBBLES`와 `RESPONSE_BUBBLE_MAX_CHARS`로 조절할 수 있습니다.
 
+## 사진 기억과 다시 보내기
+
+봇이 볼 수 있는 Discord 메시지에 이미지가 첨부되면 별도 동의 질문 없이 `data/images`에
+원본을 저장하고, 현재 대화 모델로 장면·사물·색·읽을 수 있는 글자를 한국어로 설명해
+검색 정보로 남깁니다. 분석 호출이 실패해도 원본과 파일명은 저장됩니다.
+
+대화 중 `그때 바닷가 사진 보여줘`, `저번 고양이 이미지 찾아줘`처럼 말하면 같은 DM 또는
+같은 서버 범위의 본인 사진을 찾아 원본 파일로 다시 보냅니다. 정확히 관리할 때는 다음
+명령을 사용하세요.
+
+- `/사진목록`: 최근 사진의 짧은 ID와 분석 설명
+- `/사진검색 query`: 설명과 파일명으로 검색하고 원본 재전송
+- `/사진보기 image_id`: ID로 원본 재전송
+- `/사진삭제 image_id`: 로컬 원본과 검색 대상 삭제
+- `/나를잊어`: 텍스트 기억·관계와 함께 사진 원본도 전부 삭제
+
+현재 선택한 `OPENAI_CHAT_MODEL`, `GEMINI_CHAT_MODEL`, `GROK_CHAT_MODEL`이 이미지 입력을
+지원해야 분석 설명이 생성됩니다. 지원하지 않아도 저장과 파일명 검색은 계속 작동합니다.
+
 ## 데이터 경계
 
 ```text
@@ -161,7 +185,7 @@ python -m compileall -q app tests
 - 기억하지 않는 것이 잘못 기억하는 것보다 낫습니다.
 - 원문 사실과 추론은 `is_explicit`와 신뢰도로 구분합니다.
 - 유저 본인만 자신의 비공개 기억을 조회·수정·삭제합니다.
-- 이미지 영구 저장은 기본 비활성화입니다.
+- 이미지는 이 Mac의 `data/images`에 자동 저장하며 사용자가 명령으로 삭제할 수 있습니다.
 - 로그에 토큰, DM 원문, 기억 본문을 남기지 않습니다.
 
 라이선스는 [MIT](LICENSE)입니다.
